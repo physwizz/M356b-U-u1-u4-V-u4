@@ -949,19 +949,23 @@
 
 				thermal-zones {
 
-					BIG {
+					zone_big {
+						zone-name = "BIG";
 						display-name = "BIG";
 					};
 
-					LITTLE {
+					zone_lit {
+						zone-name = "LITTLE";
 						display-name = "LIT";
 					};
 
-					G3D {
+					zone_g3d {
+						zone-name = "G3D";
 						display-name = "G3D";
 					};
 
-					ISP {
+					zone_isp {
+						zone-name = "ISP";
 						display-name = "ISP";
 					};
 				};

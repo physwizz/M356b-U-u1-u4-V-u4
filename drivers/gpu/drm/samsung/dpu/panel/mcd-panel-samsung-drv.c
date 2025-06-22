@@ -1979,9 +1979,11 @@ void wq_framedone_handler(struct work_struct *data)
 	struct dsim_device *dsim;
 	struct drm_crtc *crtc;
 	struct exynos_drm_crtc *exynos_crtc;
-	const struct exynos_drm_crtc_ops *crtc_ops;
 	struct drm_crtc_state *crtc_state;
 	int ret = 0;
+	struct decon_device *decon;
+	int fps;
+	u32 framestart_timeout;
 
 	if (!data) {
 		pr_err("%s: invalid work_struct\n", __func__);
@@ -2023,14 +2025,21 @@ void wq_framedone_handler(struct work_struct *data)
 	if (crtc_state->no_vblank)
 		usleep_range(100000, 100100);
 
-	crtc_ops = exynos_crtc->ops;
-	if (!crtc_ops || !crtc_ops->wait_framestart) {
-		pr_err("%s: invalid crtc_ops\n", __func__);
+	decon = exynos_crtc->ctx;
+	if (!decon) {
+		pr_err("%s: invalid decon\n", __func__);
 		ret = -EINVAL;
 		goto dec_exit;
 	}
 
-	crtc_ops->wait_framestart(exynos_crtc);
+	fps = decon->config.fps ?: 60;
+	framestart_timeout = MSEC_PER_SEC * 5 / fps;
+
+	if (!wait_for_completion_timeout(&decon->framestart_done, 
+		msecs_to_jiffies(framestart_timeout))) {
+
+		panel_err(decon, "%s: framestart timeout\n", __func__);
+	}
 
 	atomic_inc(&w->count);
 

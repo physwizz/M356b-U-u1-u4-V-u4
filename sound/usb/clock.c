@@ -320,6 +320,15 @@ static int __uac_clock_find_source(struct snd_usb_audio *chip,
 
 	find_source:
 		cur = ret;
+
+		if ((size_t)&sources[ret - 1] >=
+				(size_t)(chip->ctrl_intf->extra + chip->ctrl_intf->extralen)) {
+			usb_audio_err(chip,
+				"%s(): error. out of boundary, ret %d\n",
+				__func__, ret);
+			goto find_others;
+		}
+
 		ret = __uac_clock_find_source(chip, fmt,
 					      sources[ret - 1],
 					      visited, validate);
@@ -328,8 +337,16 @@ static int __uac_clock_find_source(struct snd_usb_audio *chip,
 			if (chip->quirk_flags & QUIRK_FLAG_SKIP_CLOCK_SELECTOR)
 				return ret;
 			err = uac_clock_selector_set_val(chip, entity_id, cur);
-			if (err < 0)
+			if (err < 0) {
+				if (pins == 1) {
+					usb_audio_dbg(chip,
+						      "%s(): selector returned an error, "
+						      "assuming a firmware bug, id %d, ret %d\n",
+						      __func__, clock_id, err);
+					return ret;
+				}
 				return err;
+			}
 		}
 
 		if (!validate || ret > 0 || !chip->autoclock)
@@ -340,6 +357,14 @@ static int __uac_clock_find_source(struct snd_usb_audio *chip,
 		for (i = 1; i <= pins; i++) {
 			if (i == cur)
 				continue;
+
+			if ((size_t)&sources[i - 1] >=
+					(size_t)(chip->ctrl_intf->extra + chip->ctrl_intf->extralen)) {
+				usb_audio_err(chip,
+					"%s(): error. out of boundary, i %d\n",
+					__func__, i);
+				break;
+			}
 
 			ret = __uac_clock_find_source(chip, fmt,
 						      sources[i - 1],

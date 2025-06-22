@@ -162,7 +162,10 @@ out:
 }
 /*************************************************************************************/
 
+#define FREQ_LEN 4
+
 #define MAX_CLUSTERS NR_CPUS
+#define MAX_CLUSTER_OUTPUT ((FREQ_LEN + 1) * MAX_CLUSTERS + 1)
 
 #define MAX_THERMAL_ZONES 10
 #define THERMAL_DNAME_LENGTH 5
@@ -301,8 +304,7 @@ void sec_enhanced_boot_stat_record(const char *buf)
 	entry = kmalloc(sizeof(*entry), GFP_KERNEL);
 	if (!entry)
 		return;
-	strncpy(entry->buf, buf, MAX_LENGTH_OF_BOOTING_LOG);
-	entry->buf[MAX_LENGTH_OF_BOOTING_LOG-1] = '\0';
+	strscpy(entry->buf, buf, MAX_LENGTH_OF_BOOTING_LOG);
 	t = local_clock();
 	do_div(t, 1000000);
 	entry->time = (unsigned int)t;
@@ -316,7 +318,7 @@ void sec_enhanced_boot_stat_record(const char *buf)
 }
 
 static int prev;
-void sec_bootstat_add(const char *c)
+void sec_bootstat_add(const char *buf)
 {
 	size_t i = 0;
 	unsigned long long t = 0;
@@ -330,28 +332,27 @@ void sec_bootstat_add(const char *c)
 
 	// Collect Boot_EBS from java side
 	if (!ebs_finished && events_ebs < MAX_EVENTS_EBS) {
-		if (!strncmp(c, "!@Boot_EBS: ", 12)) {
-			sec_enhanced_boot_stat_record(c + 12);
+		if (!strncmp(buf, "!@Boot_EBS: ", 12)) {
+			sec_enhanced_boot_stat_record(buf + 12);
 			return;
-		} else if (!strncmp(c, "!@Boot_EBS_", 11)) {
-			sec_enhanced_boot_stat_record(c);
+		} else if (!strncmp(buf, "!@Boot_EBS_", 11)) {
+			sec_enhanced_boot_stat_record(buf);
 			return;
 		}
 	}
 
-	if (!bootcompleted && !strncmp(c, "!@Boot_SystemServer: ", 21)) {
+	if (!bootcompleted && !strncmp(buf, "!@Boot_SystemServer: ", 21)) {
 		struct systemserver_init_time_entry *entry;
 		entry = kmalloc(sizeof(*entry), GFP_KERNEL);
 		if (!entry)
 			return;
-		strncpy(entry->buf, c + 21, MAX_LENGTH_OF_SYSTEMSERVER_LOG);
-		entry->buf[MAX_LENGTH_OF_SYSTEMSERVER_LOG-1] = '\0';
+		strscpy(entry->buf, buf + 21, MAX_LENGTH_OF_SYSTEMSERVER_LOG);
 		list_add(&entry->next, &systemserver_init_time_list);
 		return;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(boot_events); i++) {
-		if (!strncmp(c, boot_events[i].string, strlen(boot_events[i].string))) {
+		if (!strncmp(buf, boot_events[i].string, strlen(boot_events[i].string))) {
 			if (boot_events[i].time == 0) {
 				boot_events[prev].order = i;
 				prev = i;
@@ -375,30 +376,29 @@ void sec_bootstat_add(const char *c)
 
 void print_format(struct boot_event *data, struct seq_file *m, int index, int delta)
 {
-	int i, cpu, num_whitespace;
+	int i, cpu, offset;
+	char out[MAX_CLUSTER_OUTPUT];
 
 	seq_printf(m, "%-50s %6u %6u %6d ", data[index].string,
 		data[index].time + arch_timer_start, data[index].time, delta);
 
 	// print frequency of clusters
+	offset = 0;
 	for (i = 0; i < num_clusters; ++i)
-		seq_printf(m, "%4d ", data[index].freq[i] / 1000);
-
-	num_whitespace = (int)strlen("Frequency ") - (int)strlen("f_cN ") * num_clusters;
-	seq_printf(m, "%*s", num_whitespace > 0 ? num_whitespace : 0, "");
+		offset += sprintf(out + offset, "%-*d ", FREQ_LEN, data[index].freq[i] / 1000);
+	seq_printf(m, "%-*s", (int)sizeof("Frequency ") - 1, out);
 
 	// print online cpus by cluster
+	offset = 0;
 	for (i = 0; i < num_clusters; i++) {
-		seq_putc(m, '[');
+		offset += sprintf(out + offset, "[");
 		for_each_possible_cpu(cpu)
 			if (topology_cluster_id(cpu) == i)
-				seq_printf(m, "%d", (data[index].online >> cpu) & 1);
-		seq_putc(m, ']');
+				offset += sprintf(out + offset, "%d", (data[index].online >> cpu) & 1);
+		offset += sprintf(out + offset, "]");
 	}
-
-	num_whitespace = (int)strlen("Online Mask") - (2 * num_clusters + (int)nr_cpu_ids);
-	seq_printf(m, "%*s", num_whitespace > 0 ? num_whitespace : 0, "");
-	seq_putc(m, ' ');
+	offset += sprintf(out + offset, " ");
+	seq_printf(m, "%-*s", (int)sizeof("Online Mask ") - 1, out);
 
 	// print temperature of thermal zones
 	for (i = 0; i < num_thermal_zones; i++)
@@ -408,20 +408,26 @@ void print_format(struct boot_event *data, struct seq_file *m, int index, int de
 
 static int sec_boot_stat_proc_show(struct seq_file *m, void *v)
 {
+	int offset;
+	char out[MAX_CLUSTER_OUTPUT];
 	size_t i = 0;
 	unsigned int last_time = 0;
 	struct systemserver_init_time_entry *systemserver_entry;
 
-	seq_printf(m, "%71s %-*s%-*s %s\n", "", 5 * num_clusters, "Frequency", 2 * num_clusters + nr_cpu_ids,
-			"Online Mask", "Temperature");
+	seq_printf(m, "%71s %-*s%-*s %s\n", "", (FREQ_LEN + 1) * num_clusters, "Frequency ",
+			2 * num_clusters + nr_cpu_ids, "Online Mask", "Temperature");
 	seq_printf(m, "%-50s %6s %6s %6s ", "Boot Events", "time", "ktime", "delta");
 
+	offset = 0;
 	for (i = 0; i < num_clusters; i++)
-		seq_printf(m, "f_c%lu ", i);
+		offset += sprintf(out + offset, "f_c%lu ", i);
+	seq_printf(m, "%-*s", (int)sizeof("Frequency ") - 1, out);
 
+	offset = 0;
 	for (i = 0; i < num_clusters; i++)
-		seq_printf(m, "C%lu%*s", i, num_cpus_cluster[i], "");
-	seq_puts(m, " ");
+		offset += sprintf(out + offset, "C%lu%*s", i, num_cpus_cluster[i], "");
+	offset += sprintf(out + offset, " ");
+	seq_printf(m, "%-*s", (int)sizeof("Online Mask ") - 1, out);
 
 	for (i = 0; i < num_thermal_zones; i++)
 		seq_printf(m, "[%4s]", thermal_zones[i].display_name);
@@ -523,27 +529,7 @@ static const struct proc_ops sec_enhanced_boot_stat_proc_fops = {
 static ssize_t store_boot_stat(struct device *dev, struct device_attribute *attr,
 			const char *buf, size_t count)
 {
-	unsigned long long t = 0;
-
-	// Collect Boot_EBS from native side
-	if (!ebs_finished && events_ebs < MAX_EVENTS_EBS) {
-		if (!strncmp(buf, "!@Boot_EBS: ", 12)) {
-			sec_enhanced_boot_stat_record(buf + 12);
-			return count;
-		} else if (!strncmp(buf, "!@Boot_EBS_", 11)) {
-			sec_enhanced_boot_stat_record(buf);
-			return count;
-		}
-	}
-
-	if (!strncmp(buf, "!@Boot: start init process", 26)) {
-		t = local_clock();
-		do_div(t, 1000000);
-		boot_events[0].time = (unsigned int)t;
-		sec_bootstat_get_cpuinfo(boot_events[0].freq, &boot_events[0].online);
-		sec_bootstat_get_thermal(boot_events[0].temp);
-	}
-
+	sec_bootstat_add(buf);
 	return count;
 }
 
@@ -554,7 +540,7 @@ static int get_thermal_zones(void)
 	int ret = 0;
 	int i;
 	struct device_node *np, *tz;
-	const char *dname;
+	const char *zname, *dname;
 
 	np = of_find_node_by_path("/sec-bootstat/thermal-zones");
 	if (!np) {
@@ -563,7 +549,12 @@ static int get_thermal_zones(void)
 	}
 
 	for_each_available_child_of_node(np, tz) {
-		strscpy(thermal_zones[ret].name, tz->name, THERMAL_NAME_LENGTH);
+		if (of_property_read_string(tz, "zone-name", &zname) < 0) {
+			pr_err("invalid or no zone-name for thermal zone: %s\n", tz->name);
+			continue;
+		} else {
+			strscpy(thermal_zones[ret].name, zname, THERMAL_NAME_LENGTH);
+		}
 
 		if (of_property_read_string(tz, "display-name", &dname) < 0) {
 			pr_err("invalid or no display-name for thermal zone: %s\n", tz->name);
@@ -686,6 +677,7 @@ static int __init_or_module sec_bootstat_init(void)
 		pr_err("%s: Failed to create device file\n", __func__);
 
 	register_hook_bootstat(sec_bootstat_add);
+
 	return 0;
 }
 

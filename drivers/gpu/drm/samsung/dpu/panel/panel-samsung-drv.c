@@ -1335,6 +1335,10 @@ static void exynos_panel_parse_vendor_params(struct device *dev, struct exynos_p
 				&decon->config.vendor_pps.scale_increment_interval);
 		of_property_read_u32(np, "final_offset",
 				&decon->config.vendor_pps.final_offset);
+		of_property_read_u32(np, "nfl_bpg_offset",
+				&decon->config.vendor_pps.nfl_bpg_offset);
+		of_property_read_u32(np, "slice_bpg_offset",
+				&decon->config.vendor_pps.slice_bpg_offset);
 		of_property_read_u32(np, "comp_cfg",
 				&decon->config.vendor_pps.comp_cfg);
 
