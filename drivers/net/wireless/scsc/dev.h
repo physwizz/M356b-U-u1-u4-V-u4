@@ -1495,6 +1495,7 @@ struct slsi_tas_info {
 	struct tas_sar_param previous_sar_param;
 	u16 sar_limit_upper;
 	u16 sar_compliance;
+	u8 sar_method;
 	bool if_enabled[SLSI_TAS_IF_TYPE_MAX];
 };
 #endif

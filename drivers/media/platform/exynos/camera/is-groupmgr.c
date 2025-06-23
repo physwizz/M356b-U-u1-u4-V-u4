@@ -1954,6 +1954,7 @@ static void is_group_override_sensor_req(struct is_group *group,
 		if (frame->shot->ctl.aa.aeMode == AA_AEMODE_OFF
 		    || frame->shot->ctl.aa.mode == AA_CONTROL_OFF) {
 			prev->shot->ctl.sensor.exposureTime	= frame->shot->ctl.sensor.exposureTime;
+			prev->shot->ctl.aa.vendor_captureExposureTime = frame->shot->ctl.aa.vendor_captureExposureTime;
 			prev->shot->ctl.sensor.frameDuration	= frame->shot->ctl.sensor.frameDuration;
 			prev->shot->ctl.sensor.sensitivity	= frame->shot->ctl.sensor.sensitivity;
 			prev->shot->ctl.aa.vendor_isoValue	= frame->shot->ctl.aa.vendor_isoValue;

@@ -119,12 +119,7 @@ MODULE_PARM_DESC(EnableRfTestMode, "Enable RF test mode driver.");
 
 static int slsi_5ghz_all_chans[] = {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124,
 				    128, 132, 136, 140, 144, 149, 153, 157, 161,
-#ifdef CONFIG_SCSC_UNII4
-				    165, 169, 173, 177
-#else
-				    165
-#endif
-};
+				    165, 169, 173, 177};
 
 static int slsi_mib_open_file(struct slsi_dev *sdev, struct slsi_dev_mib_info *mib_info, const struct firmware **fw);
 static int slsi_mib_close_file(struct slsi_dev *sdev, const struct firmware *e);
@@ -1963,6 +1958,11 @@ static void slsi_tas_get_config(struct slsi_dev *sdev, struct slsi_mib_value *va
 		tas_info->sar_compliance = values[*mib_index].u.uintValue;
 	else
 		SLSI_ERR(sdev, "SAR reading SAR Compliance\n");
+
+	if (values[++*mib_index].type != SLSI_MIB_TYPE_NONE)
+		tas_info->sar_method = values[*mib_index].u.uintValue;
+	else
+		SLSI_ERR(sdev, "SAR reading SAR Method\n");
 }
 #endif
 
@@ -2169,6 +2169,7 @@ static int slsi_get_mib_entry_value(struct slsi_dev *sdev, struct slsi_mib_value
 #if defined(CONFIG_SCSC_WLAN_TAS)
 /* TODO: To be removed here after autogen */
 #define SLSI_PSID_UNIFI_SAR_ALLOWANCE 6222
+#define SLSI_PSID_UNIFI_SAR_ALGORITHM 6217
 #endif
 static int slsi_mib_initial_get(struct slsi_dev *sdev)
 {
@@ -2218,6 +2219,7 @@ static int slsi_mib_initial_get(struct slsi_dev *sdev)
 		{ SLSI_PSID_UNIFI_SAE_DWELL_TIME, {0, 0} },
 #if defined(CONFIG_SCSC_WLAN_TAS)
 		{ SLSI_PSID_UNIFI_SAR_ALLOWANCE, {0, 0} },
+		{ SLSI_PSID_UNIFI_SAR_ALGORITHM, {0, 0} },
 #endif
 
 	};/*Check the mibrsp.dataLength when a new mib is added*/
@@ -2226,7 +2228,7 @@ static int slsi_mib_initial_get(struct slsi_dev *sdev)
 	if (r != SLSI_MIB_STATUS_SUCCESS)
 		return -ENOMEM;
 
-	mibrsp.dataLength = 280;
+	mibrsp.dataLength = 290;
 	mibrsp.data = kmalloc(mibrsp.dataLength, GFP_KERNEL);
 	if (!mibrsp.data) {
 		kfree(mibreq.data);

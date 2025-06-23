@@ -2713,6 +2713,10 @@ void slsi_rx_synchronised_ind(struct slsi_dev *sdev, struct net_device *dev, str
 {
 	struct netdev_vif *ndev_vif = netdev_priv(dev);
 	struct cfg80211_external_auth_params auth_request;
+	struct ieee80211_mgmt *mgmt = fapi_get_mgmt(skb);
+	size_t mgmt_len = fapi_get_mgmtlen(skb);
+	int ie_len = mgmt_len - (mgmt->u.probe_resp.variable - (u8 *)mgmt);
+	const u8 *rsn = cfg80211_find_ie(WLAN_EID_RSN, mgmt->u.probe_resp.variable, ie_len);
 	int r, synch_ind_time = 0;
 	u16 sae_auth = 0;
 	u8 bssid[ETH_ALEN] = {0};
@@ -2732,8 +2736,12 @@ void slsi_rx_synchronised_ind(struct slsi_dev *sdev, struct net_device *dev, str
 		goto exit;
 	}
 
-	SLSI_NET_DBG1(dev, SLSI_MLME, "Received synchronised_ind, bssid:%pM SAE Auth Request = %d\n", bssid, sae_auth);
-	if (ndev_vif->sta.crypto.wpa_versions == 3 && !sae_auth) {
+	SLSI_NET_DBG1(dev, SLSI_MLME, "Received synchronised_ind, bssid:" MACSTR " SAE Auth Request = %d\n",
+		      MAC2STR(bssid), sae_auth);
+	if (sae_auth) {
+		if (slsi_wake_lock_active(&ndev_vif->wlan_wl_sae))
+			slsi_wake_unlock(&ndev_vif->wlan_wl_sae);
+	} else {
 		slsi_rx_scan_pass_to_cfg80211(sdev, dev, skb, false);
 		if (!slsi_wake_lock_active(&ndev_vif->wlan_wl_sae))
 			slsi_wake_lock(&ndev_vif->wlan_wl_sae);
@@ -2747,6 +2755,41 @@ void slsi_rx_synchronised_ind(struct slsi_dev *sdev, struct net_device *dev, str
 		memcpy(auth_request.bssid, bssid, ETH_ALEN);
 		memcpy(auth_request.ssid.ssid, ndev_vif->sta.ssid, ndev_vif->sta.ssid_len);
 		auth_request.ssid.ssid_len = ndev_vif->sta.ssid_len;
+		if (rsn) {
+			if (cpu_to_be32(ndev_vif->sta.crypto.akm_suites[0]) == SLSI_KEY_MGMT_PSK ||
+			    cpu_to_be32(ndev_vif->sta.crypto.akm_suites[0]) == SLSI_KEY_MGMT_PSK_SHA) {
+				int i, pos = 0;
+
+				pos = 7 + 2 + (rsn[8] * 4) + 2;
+				for (i = 0; i < rsn[pos - 1]; i++) {
+					if (rsn[pos + (i + 1) * 4] == 0x08) {
+						pos += i * 4;
+						break;
+					}
+				}
+				if (rsn[pos + 4] == 0x08) {
+					ndev_vif->sta.crypto.akm_suites[0] = ((rsn[pos + 4] << 24) |
+									      (rsn[pos + 3] << 16) |
+									      (rsn[pos + 2] << 8) |
+									      (rsn[pos + 1]));
+				} else {
+					SLSI_NET_ERR(dev, "SAE AKM Suite(00-0F-AC:8) is NOT in Probe Response\n");
+					goto exit;
+				}
+				ndev_vif->sta.use_set_pmksa = 1;
+				ndev_vif->sta.rsn_ie_len = rsn[1];
+				kfree(ndev_vif->sta.rsn_ie);
+				ndev_vif->sta.rsn_ie = NULL;
+				/* Len+2 because RSN IE TAG and Length */
+				ndev_vif->sta.rsn_ie = kmalloc(ndev_vif->sta.rsn_ie_len + 2, GFP_KERNEL);
+
+				/* len+2 because RSNIE TAG and Length */
+				if (ndev_vif->sta.rsn_ie)
+					memcpy(ndev_vif->sta.rsn_ie, rsn, ndev_vif->sta.rsn_ie_len + 2);
+			}
+		}
+		ndev_vif->sta.crypto.wpa_versions = 3;
+
 		auth_request.key_mgmt_suite = ndev_vif->sta.crypto.akm_suites[0];
 
 		r = cfg80211_external_auth_request(dev, &auth_request, GFP_KERNEL);
